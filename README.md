@@ -15,6 +15,8 @@ This repository contains a unified Python pipeline that completely replaces exte
 
 [//]: # (Add demo video here — see comment above for embedding options)
 
+[demo.mp4](docs/images/demo.mp4)
+
 ---
 
 ## Features
@@ -146,9 +148,9 @@ Once calibration is complete and your matrix is hard-coded into the pipeline, yo
   Use the 's' key while running main.py to capture these directly.
 -->
 
-| Before Sorting | After Sorting |
-|---|---|
-| ![Working area before sorting](docs/images/before_sorting.png) | ![Working area after sorting](docs/images/after_sorting.png) |
+| Before Sorting                                                  | After Sorting |
+|-----------------------------------------------------------------|---|
+| ![Working area before sorting](docs/images/before_sorting.jpeg) | ![Working area after sorting](docs/images/after_sorting.jpeg) |
 
 <!--
   DETECTION OVERLAY EXAMPLE
@@ -157,7 +159,7 @@ Once calibration is complete and your matrix is hard-coded into the pipeline, yo
   to see expected output at a glance.
 -->
 
-### Live Detection Overlay
+### Detection Result 
 
 ![Detection overlay example](docs/images/detection_overlay_example.png)
 
@@ -179,7 +181,7 @@ Objects are routed to one of several bins based on shape and color:
   understand the physical setup without reading constants.py.
 -->
 
-![Physical bin layout](docs/images/bin_layout.png)
+![Physical bin layout](docs/images/bin_layout.jpeg)
 
 ---
 
