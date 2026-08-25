@@ -64,11 +64,22 @@ class ObjectDetector:
         cv2.cvtColor(self.blurred, cv2.COLOR_BGR2GRAY, dst=self.gray)
 
         # Threshold (reuse buffer)
-        cv2.threshold(
+        """cv2.threshold(
             self.gray,
             ImageProcessingConstants.THRESHOLD_VALUE,
             ImageProcessingConstants.THRESHOLD_MAX,
             cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
+            dst=self.thresh
+        )"""
+
+        # Threshold on saturation channel instead of grayscale —
+        # lets us pick up light-colored (e.g. gold) objects on a light background
+        saturation = self.hsv[:, :, 1]
+        cv2.threshold(
+            saturation,
+            ImageProcessingConstants.THRESHOLD_VALUE,
+            ImageProcessingConstants.THRESHOLD_MAX,
+            cv2.THRESH_BINARY + cv2.THRESH_OTSU,
             dst=self.thresh
         )
 
@@ -100,7 +111,9 @@ class ObjectDetector:
             for contour in contours:
                 area = cv2.contourArea(contour)
                 if area < ImageProcessingConstants.MIN_CONTOUR_AREA_PX2:
+                    #print(f"DEBUG dropped by area: area={area:.0f} min={ImageProcessingConstants.MIN_CONTOUR_AREA_PX2}")
                     continue
+
 
                 shape = classify_shape(contour)
                 if shape not in SortingRulesConstants.VALID_SHAPES:
@@ -198,6 +211,8 @@ def classify_shape(contour: np.ndarray) -> Optional[str]:
         if (ImageProcessingConstants.SQUARE_ASPECT_RATIO_MIN <= aspect_ratio <=
                 ImageProcessingConstants.SQUARE_ASPECT_RATIO_MAX):
             return "Square"
+
+    #print(f"DEBUG REJECTED: sides={sides} matched no shape")
 
     return None
 
@@ -297,7 +312,9 @@ def process_frame(frame_bgr: np.ndarray) -> np.ndarray:
     """
     detector = get_detector(frame_shape=(frame_bgr.shape[0], frame_bgr.shape[1]))
     hsv, thresh, gray = detector.preprocess_frame(frame_bgr)
+    #cv2.imwrite("debug_thresh.png", detector.thresh)
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
 
     detections_this_frame: List[str] = []
     for contour in contours:
