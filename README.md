@@ -15,7 +15,9 @@ This repository contains a unified Python pipeline that completely replaces exte
 
 [//]: # (Add demo video here — see comment above for embedding options)
 
-[demo.mp4](docs/images/demo.mp4)
+
+<video src="docs/images/demo.mp4" controls="controls" width="100%">
+</video>
 
 ---
 
