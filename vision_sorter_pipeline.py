@@ -1,52 +1,52 @@
 """
-feature_detection.py
-q
-Hikrobot MVS SDK -> OpenCV live view / detection / PLC sorting, all in one
-file. No vision-master needed: objects are detected locally with OpenCV
-(shape + color + pixel position), then fed straight into the PLC
-pick-and-place sorting sequence over a socket, the same way the reference
-script's "vm,0" trigger used to.
+vision_sorter_pipeline.py
+
+Hikrobot MVS SDK + OpenCV live acquisition, local shape/color detection,
+and PLC-based pick-and-place sorting over a socket.
 
 Requirements:
-    1. Hikrobot MVS SDK installed (official installer from Hikrobot website)
-    2. MvImport folder copied next to this script (from the SDK's
-       Development/Samples/Python/MvImport directory)
-    3. pip install opencv-python numpy
+    - Hikrobot MVS SDK installed (use the official installer)
+    - Copy the SDK's MvImport folder next to this script or set MVIMPORT_DIR
+    - pip install opencv-python numpy
 
 Usage:
-    python feature_detection.py
-    Press 'q' to quit, 's' to save a snapshot, 't' to trigger sorting.
+    python vision_sorter_pipeline.py
+    Keys: 'q' to quit, 's' to save a snapshot, 't' to trigger sorting
 
---------------------------------------------------------------------
-IMPORTANT: PIXEL COORDINATES vs ROBOT COORDINATES
---------------------------------------------------------------------
-The detector below only knows PIXEL coordinates (and, for squares, a
-pixel-space rotation angle). The PLC/robot expects coordinates in its own
-base frame (mm) and a grab angle in degrees. These are NOT the same
-numbers.
+Calibration (pixel -> robot):
+    This detector reports pixel coordinates (and a pixel-space rotation for
+    squares). The robot/PLC requires coordinates in the robot base frame
+    (millimeters) and a grab angle in degrees — these are different units.
 
-Before this can actually drive the robot, you need a calibration that
-maps camera pixel (px, py) -> robot (X, Y):
-  1. Jog the robot to 3-4 known points inside the camera's field of view.
-  2. Record the pixel coordinates of a marker at each point and the
-     matching robot X/Y.
-  3. Fit an affine transform (cv2.getAffineTransform for 3 points, or
-     cv2.estimateAffine2D for 4+) once, offline, and hard-code the
-     resulting matrix in pixel_to_robot() below.
+    To operate the robot safely, collect 3–4 correspondences (pixel_x, pixel_y
+    -> robot_X, robot_Y), then compute an affine transform (cv2.getAffineTransform
+    for 3 points or cv2.estimateAffine2D for 4+ points). Replace the placeholder
+    pixel_to_robot() with the fitted transform matrix before enabling real picks.
 
-Until that calibration is done, pixel_to_robot() is only a placeholder
-(identity-ish scaling) so the rest of the pipeline can be tested
-end-to-end. Replace it with your real calibration before real grabs.
+Until calibrated, pixel_to_robot() contains a simple identity-ish placeholder
+so the pipeline can be exercised end-to-end without driving the robot.
 """
 
 import os
 import sys
 import time
 import socket
+import logging
 from ctypes import byref, memset, sizeof, cast, POINTER, c_ubyte
 
 import cv2
 import numpy as np
+
+# Import custom modules
+from exceptions import (
+    HikrobotError, PLCError, PLCConnectionError, PLCTimeoutError,
+    PLCInvalidResponseError, PLCOperationError, FrameConversionError
+)
+from logging_config import setup_logging, get_logger
+from health_checker import SystemHealthChecker
+
+# Setup logging
+logger = setup_logging()
 
 # ---------------------------------------------------------------------------
 # 0. Make sure Windows can find the runtime DLLs, then import the SDK
@@ -86,28 +86,33 @@ except ImportError as e:
 # ---------------------------------------------------------------------------
 def frame_to_bgr(cam, stFrame):
     """Convert an MV_FRAME_OUT payload to a BGR numpy array using the SDK."""
-    stConvertParam = MV_CC_PIXEL_CONVERT_PARAM()
-    memset(byref(stConvertParam), 0, sizeof(stConvertParam))
+    try:
+        stConvertParam = MV_CC_PIXEL_CONVERT_PARAM()
+        memset(byref(stConvertParam), 0, sizeof(stConvertParam))
 
-    stConvertParam.nWidth = stFrame.stFrameInfo.nWidth
-    stConvertParam.nHeight = stFrame.stFrameInfo.nHeight
-    stConvertParam.pSrcData = stFrame.pBufAddr
-    stConvertParam.nSrcDataLen = stFrame.stFrameInfo.nFrameLen
-    stConvertParam.enSrcPixelType = stFrame.stFrameInfo.enPixelType
-    stConvertParam.enDstPixelType = PixelType_Gvsp_BGR8_Packed
+        stConvertParam.nWidth = stFrame.stFrameInfo.nWidth
+        stConvertParam.nHeight = stFrame.stFrameInfo.nHeight
+        stConvertParam.pSrcData = stFrame.pBufAddr
+        stConvertParam.nSrcDataLen = stFrame.stFrameInfo.nFrameLen
+        stConvertParam.enSrcPixelType = stFrame.stFrameInfo.enPixelType
+        stConvertParam.enDstPixelType = PixelType_Gvsp_BGR8_Packed
 
-    dst_size = stFrame.stFrameInfo.nWidth * stFrame.stFrameInfo.nHeight * 3
-    dst_buf = (c_ubyte * dst_size)()
-    stConvertParam.pDstBuffer = cast(dst_buf, POINTER(c_ubyte))
-    stConvertParam.nDstBufferSize = dst_size
+        dst_size = stFrame.stFrameInfo.nWidth * stFrame.stFrameInfo.nHeight * 3
+        dst_buf = (c_ubyte * dst_size)()
+        stConvertParam.pDstBuffer = cast(dst_buf, POINTER(c_ubyte))
+        stConvertParam.nDstBufferSize = dst_size
 
-    ret = cam.MV_CC_ConvertPixelType(stConvertParam)
-    if ret != 0:
-        raise RuntimeError(f"Pixel conversion failed. Error code: 0x{ret:x}")
+        ret = cam.MV_CC_ConvertPixelType(stConvertParam)
+        if ret != 0:
+            raise FrameConversionError(f"Pixel conversion failed. Error code: 0x{ret:x}")
 
-    img = np.frombuffer(dst_buf, dtype=np.uint8, count=dst_size)
-    img = img.reshape(stFrame.stFrameInfo.nHeight, stFrame.stFrameInfo.nWidth, 3)
-    return img
+        img = np.frombuffer(dst_buf, dtype=np.uint8, count=dst_size)
+        img = img.reshape(stFrame.stFrameInfo.nHeight, stFrame.stFrameInfo.nWidth, 3)
+        logger.debug(f"Frame converted successfully: {img.shape}")
+        return img
+    except Exception as e:
+        logger.error(f"Frame conversion error: {e}", exc_info=True)
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -177,45 +182,50 @@ def detect_objects(frame_bgr):
     where x/y are the pixel-space centroid (bounding-box center) of the
     object. This is what feeds the sorting sequence below.
     """
-    blurred = cv2.GaussianBlur(frame_bgr, (5, 5), 0)
-    hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
-    gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
+    try:
+        blurred = cv2.GaussianBlur(frame_bgr, (5, 5), 0)
+        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+        gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
 
-    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
 
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    results = []
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        if area < MIN_CONTOUR_AREA:
-            continue
+        results = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < MIN_CONTOUR_AREA:
+                continue
 
-        shape = classify_shape(contour)
-        if shape not in ["Square", "Circle"]:
-            continue
+            shape = classify_shape(contour)
+            if shape not in ["Square", "Circle"]:
+                continue
 
-        obj_mask = np.zeros(gray.shape, dtype=np.uint8)
-        cv2.drawContours(obj_mask, [contour], -1, 255, thickness=cv2.FILLED)
-        color = classify_color(hsv, obj_mask)
-        if color not in ["Red", "Blue", "Yellow"]:
-            continue
+            obj_mask = np.zeros(gray.shape, dtype=np.uint8)
+            cv2.drawContours(obj_mask, [contour], -1, 255, thickness=cv2.FILLED)
+            color = classify_color(hsv, obj_mask)
+            if color not in ["Red", "Blue", "Yellow"]:
+                continue
 
-        x, y, w, h = cv2.boundingRect(contour)
-        cx, cy = x + w / 2.0, y + h / 2.0
-        angle = _contour_angle(contour, shape)
+            x, y, w, h = cv2.boundingRect(contour)
+            cx, cy = x + w / 2.0, y + h / 2.0
+            angle = _contour_angle(contour, shape)
 
-        results.append({
-            "shape": shape,
-            "color": color,
-            "x": cx,
-            "y": cy,
-            "angle": angle,
-        })
-
-    return results
+            results.append({
+                "shape": shape,
+                "color": color,
+                "x": cx,
+                "y": cy,
+                "angle": angle,
+            })
+        
+        logger.debug(f"Detected {len(results)} objects in frame")
+        return results
+    except Exception as e:
+        logger.error(f"Detection error: {e}", exc_info=True)
+        raise
 
 
 def process_frame(frame_bgr):
@@ -300,7 +310,11 @@ def is_target_object(shape, color):
 # 5. PLC / robot controller (pick-and-place sorting logic)
 # ---------------------------------------------------------------------------
 class PLCController:
+    """PLC robot controller for pick-and-place sorting with validation."""
+    
     BUFSIZE = 2048
+    MAX_RESPONSE_LENGTH = 100  # Max expected length of PLC response
+    VALID_RESPONSE_PATTERN = r"^\d+$"  # PLC responses should be numeric
 
     def __init__(self, ip="192.168.6.10", port=2023,
                  z_above="-30", z_grab="-84"):
@@ -309,32 +323,134 @@ class PLCController:
         self.z = z_above   # height above grab/place point
         self.H = z_grab    # actual grab/place point height
         self.client = None
+        self.logger = get_logger()
 
         # bin-fill counters, persist across calls (like `a` and `b`
         # in the reference script)
         self.count_target = 0
         self.count_reject = 0
+        
+        self.logger.info(f"PLCController initialized: {ip}:{port}, z_above={z_above}, z_grab={z_grab}")
+
+    # --- Response Validation ---
+    def _validate_response(self, response: str) -> bool:
+        """Validate PLC response format and content.
+        
+        Args:
+            response: Raw response from PLC
+            
+        Returns:
+            True if response is valid, False otherwise
+            
+        Raises:
+            PLCInvalidResponseError: If response is invalid
+        """
+        if not response:
+            self.logger.error("PLC response is empty")
+            raise PLCInvalidResponseError("PLC response is empty")
+        
+        response_stripped = response.strip()
+        
+        # Check response length
+        if len(response_stripped) > self.MAX_RESPONSE_LENGTH:
+            self.logger.error(f"PLC response too long: {len(response_stripped)} chars (max {self.MAX_RESPONSE_LENGTH})")
+            raise PLCInvalidResponseError(f"Response too long: {len(response_stripped)} chars")
+        
+        # Check response contains only expected characters (digits)
+        if not response_stripped.isdigit():
+            self.logger.error(f"PLC response contains invalid characters: {response_stripped!r}")
+            raise PLCInvalidResponseError(f"Response contains invalid characters: {response_stripped!r}")
+        
+        self.logger.debug(f"PLC response validated: {response_stripped!r}")
+        return True
 
     # -- low level -----------------------------------------------------
     def connect(self):
-        self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.client.connect((self.ip, self.port))
+        """Establish socket connection to PLC."""
+        try:
+            self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client.connect((self.ip, self.port))
+            self.logger.info(f"Connected to PLC at {self.ip}:{self.port}")
+        except socket.timeout as e:
+            self.logger.error(f"Connection timeout to PLC at {self.ip}:{self.port}")
+            raise PLCTimeoutError(f"Connection timeout: {e}") from e
+        except socket.error as e:
+            self.logger.error(f"Failed to connect to PLC at {self.ip}:{self.port}: {e}")
+            raise PLCConnectionError(f"Connection failed: {e}") from e
+        except Exception as e:
+            self.logger.error(f"Unexpected error connecting to PLC: {e}", exc_info=True)
+            raise PLCConnectionError(f"Unexpected error: {e}") from e
 
     def close(self):
+        """Close connection to PLC."""
         if self.client is not None:
-            self.client.close()
-            self.client = None
+            try:
+                self.client.close()
+                self.logger.info("PLC connection closed")
+            except Exception as e:
+                self.logger.warning(f"Error closing PLC connection: {e}")
+            finally:
+                self.client = None
 
     def _task(self, msg):
-        self.client.send(msg.encode("utf-8"))
-        recv_data = self.client.recv(self.BUFSIZE).decode("gbk")
-        return recv_data
+        """Send command to PLC and receive response with validation.
+        
+        Args:
+            msg: Command message to send
+            
+        Returns:
+            Response string from PLC
+            
+        Raises:
+            PLCConnectionError: If connection is lost
+            PLCTimeoutError: If no response is received
+            PLCInvalidResponseError: If response is invalid
+        """
+        try:
+            self.logger.debug(f"Sending PLC command: {msg!r}")
+            self.client.send(msg.encode("utf-8"))
+            recv_data = self.client.recv(self.BUFSIZE).decode("gbk")
+            self._validate_response(recv_data)
+            self.logger.debug(f"PLC response: {recv_data!r}")
+            return recv_data
+        except socket.timeout as e:
+            self.logger.error(f"PLC communication timeout: {e}")
+            raise PLCTimeoutError(f"No response from PLC: {e}") from e
+        except socket.error as e:
+            self.logger.error(f"PLC socket error: {e}")
+            raise PLCConnectionError(f"Connection lost: {e}") from e
+        except (PLCInvalidResponseError, PLCTimeoutError, PLCConnectionError):
+            raise
+        except Exception as e:
+            self.logger.error(f"Unexpected error in PLC communication: {e}", exc_info=True)
+            raise PLCOperationError(f"Communication error: {e}") from e
 
     def _handshake(self):
-        return self._task("plc,6")
+        """Send handshake command and validate response."""
+        try:
+            response = self._task("plc,6")
+            if response.strip() != "1":
+                self.logger.warning(f"Handshake returned non-ready status: {response!r}")
+            return response
+        except Exception as e:
+            self.logger.error(f"Handshake failed: {e}")
+            raise
 
     def _move(self, x, y, z, angle):
-        return self._task(f"plc,{x},{y},{z},{angle},7")
+        """Send move command and validate response.
+        
+        Args:
+            x, y, z: Position coordinates
+            angle: Rotation angle in degrees
+        """
+        try:
+            response = self._task(f"plc,{x},{y},{z},{angle},7")
+            if response.strip() != "1":
+                self.logger.warning(f"Move returned non-ready status: {response!r}")
+            return response
+        except Exception as e:
+            self.logger.error(f"Move command failed at ({x}, {y}, {z}, {angle}): {e}")
+            raise
 
     # -- shared motions --------------------------------------------------
     def go_to_photo_point(self, x="20", y="85", z="20", angle="0"):
@@ -431,27 +547,43 @@ class PLCController:
             first. Set to True once upstream code already supplies
             calibrated robot coordinates.
         """
+        if not detections:
+            self.logger.warning("process_detections called with empty detection list")
+            return
+        
+        self.logger.info(f"Processing {len(detections)} detections")
+        
         for i, det in enumerate(detections):
-            shape = det["shape"]
-            color = det["color"]
-            angle = str(det.get("angle", 0))
+            try:
+                shape = det["shape"]
+                color = det["color"]
+                angle = str(det.get("angle", 0))
 
-            if use_robot_coords:
-                robot_x, robot_y = det["x"], det["y"]
-            else:
-                robot_x, robot_y = pixel_to_robot(det["x"], det["y"])
+                if use_robot_coords:
+                    robot_x, robot_y = det["x"], det["y"]
+                else:
+                    robot_x, robot_y = pixel_to_robot(det["x"], det["y"])
 
-            x_str, y_str = str(robot_x), str(robot_y)
+                x_str, y_str = str(robot_x), str(robot_y)
 
-            print(f"[{i + 1}/{len(detections)}] {color} {shape} "
-                  f"-> grabbing at ({x_str}, {y_str})")
+                self.logger.info(f"[{i + 1}/{len(detections)}] {color} {shape} "
+                                f"-> grabbing at ({x_str}, {y_str}), angle={angle}°")
+                print(f"[{i + 1}/{len(detections)}] {color} {shape} "
+                      f"-> grabbing at ({x_str}, {y_str})")
 
-            self._grab(x_str, y_str, angle)
+                self._grab(x_str, y_str, angle)
 
-            if is_target_object(shape, color):
-                self._place_target()
-            else:
-                self._place_reject()
+                if is_target_object(shape, color):
+                    self.logger.debug(f"Object is target, placing in target bin")
+                    self._place_target()
+                else:
+                    self.logger.debug(f"Object is reject, placing in reject bin")
+                    self._place_reject()
+                
+                self.logger.info(f"Successfully processed object {i + 1}/{len(detections)}")
+            except (PLCError, Exception) as e:
+                self.logger.error(f"Failed to process detection {i + 1}/{len(detections)}: {e}", exc_info=True)
+                raise
 
 
 def run_sorting(detections, ip="192.168.6.10", port=2023,
@@ -461,19 +593,41 @@ def run_sorting(detections, ip="192.168.6.10", port=2023,
     Called from the live-view loop below when 't' is pressed, the same
     role the reference script's "vm,0" trigger used to play.
     """
+    logger = get_logger()
+    
     if not detections:
+        logger.info("No objects to sort, skipping.")
         print("No objects to sort, skipping.")
         return
 
     plc = PLCController(ip=ip, port=port, z_above=z_above, z_grab=z_grab)
-    plc.connect()
+    
     try:
+        logger.info(f"Starting sorting sequence with {len(detections)} objects")
+        plc.connect()
         plc.process_detections(detections)
         if go_home_after:
+            logger.info("Returning to home position")
             plc.go_to_photo_point()
+        logger.info("Sorting task completed successfully")
+        print("Sorting task completed.")
+    except PLCConnectionError as e:
+        logger.error(f"PLC connection failed: {e}")
+        print(f"ERROR: Failed to connect to PLC: {e}")
+    except PLCTimeoutError as e:
+        logger.error(f"PLC communication timeout: {e}")
+        print(f"ERROR: PLC timeout: {e}")
+    except PLCInvalidResponseError as e:
+        logger.error(f"Invalid PLC response: {e}")
+        print(f"ERROR: Invalid PLC response: {e}")
+    except PLCOperationError as e:
+        logger.error(f"PLC operation failed: {e}")
+        print(f"ERROR: PLC operation failed: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected error during sorting: {e}", exc_info=True)
+        print(f"ERROR: Unexpected error: {e}")
     finally:
         plc.close()
-    print("Sorting task completed.")
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +681,18 @@ def main():
     ret = cam.MV_CC_StartGrabbing()
     if ret != 0:
         raise RuntimeError(f"Start grabbing failed! Error code: 0x{ret:x}")
+
+    # Perform health checks before starting
+    logger.info("Performing system health checks...")
+    health_checker = SystemHealthChecker()
+    all_healthy, check_results = health_checker.check_all()
+    health_checker.print_report()
+    
+    if not all_healthy:
+        logger.warning("Some health checks failed. Proceeding with caution.")
+        print("WARNING: Some system components may not be ready.")
+    else:
+        logger.info("All health checks passed. System is ready.")
 
     print("Moving robot to photo point before starting...")
     plc = PLCController()
