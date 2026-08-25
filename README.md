@@ -13,7 +13,7 @@ This repository contains a unified Python pipeline that completely replaces exte
 -->
 ## Demo
 
-<video src="docs/images/demo.mp4" controls="controls" width="100%">
+[//]: # (<video src="docs/images/demo.mp4" controls="controls" width="100%">)
 
 
 ---
