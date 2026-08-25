@@ -116,6 +116,8 @@ class PLCConstants:
     GRID_ROWS = 2
     GRID_COLUMNS = 3
     GRID_CELL_SIZE = 45  # mm between slots
+    #TRIANGLE_GRID_CELL_SIZE = 80  # mm between slots (triangle bin)
+    TRIANGLE_BIN_STEP_X = 80
     
     # Target bin positioning
     TARGET_BIN_ORIGIN_X = -101  # mm
@@ -124,6 +126,10 @@ class PLCConstants:
     # Reject bin positioning
     REJECT_BIN_ORIGIN_X = 160.5  # mm
     REJECT_BIN_ORIGIN_Y = 60.5   # mm
+
+    # Triangle bin positioning
+    TRIANGLE_BIN_ORIGIN_X = 155.0  # mm
+    TRIANGLE_BIN_ORIGIN_Y = 134.0  # mm
 
 
 # =============================================================================
@@ -249,6 +255,7 @@ class SortingRulesConstants:
     # Placement strategy
     PLACE_TARGET_BIN = "target"
     PLACE_REJECT_BIN = "reject"
+    PLACE_TRIANGLE_BIN = "triangle"
 
 
 # =============================================================================

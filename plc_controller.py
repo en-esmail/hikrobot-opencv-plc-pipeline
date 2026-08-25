@@ -45,6 +45,7 @@ class PLCController:
         # bin-fill counters, persist across calls
         self.count_target: int = 0
         self.count_reject: int = 0
+        self.count_triangle: int = 0
 
         self.logger.info(f"PLCController initialized: {ip}:{port}, z_above={z_above}, z_grab={z_grab}")
 
@@ -285,6 +286,14 @@ class PLCController:
         self._place(str(place_x), str(place_y), "0")
         self.count_reject += 1
 
+    def _place_triangle(self) -> None:
+        """Place triangle object in its own bin and increment counter."""
+        row, column, _height = self._grid_slot(self.count_triangle)
+        place_x = PLCConstants.TRIANGLE_BIN_ORIGIN_X - (self.count_triangle * PLCConstants.TRIANGLE_BIN_STEP_X)
+        place_y = PLCConstants.TRIANGLE_BIN_ORIGIN_Y
+        self._place(str(place_x), str(place_y), "0")
+        self.count_triangle += 1
+
     # -- top level --------------------------------------------------------
     def process_detections(
             self,
@@ -325,7 +334,11 @@ class PLCController:
 
                 self._grab(x_str, y_str, angle)
 
-                if (shape == SortingRulesConstants.TARGET_SHAPE and
+                if shape == "Triangle":
+                    self.logger.debug(f"Object is a triangle, placing in triangle bin")
+                    self._place_triangle()
+
+                elif (shape == SortingRulesConstants.TARGET_SHAPE and
                         color == SortingRulesConstants.TARGET_COLOR):
                     self.logger.debug(f"Object is target, placing in target bin")
                     self._place_target()
