@@ -672,11 +672,11 @@ class PLCController:
 
     def _move(self, x: str, y: str, z: str, angle: str) -> str:
         """Send move command and validate response.
-        
+
         Args:
             x, y, z: Position coordinates
             angle: Rotation angle in degrees
-            
+
         Returns:
             Response string from PLC
         """
@@ -699,11 +699,11 @@ class PLCController:
         angle: str = "0"
     ) -> str:
         """Move to the fixed photo point.
-        
+
         Args:
             x, y, z: Position coordinates
             angle: Rotation angle in degrees
-            
+
         Returns:
             PLC response string
         """
@@ -717,7 +717,7 @@ class PLCController:
 
     def _grab(self, x: str, y: str, angle: str) -> None:
         """Execute grab sequence: hover -> grasp -> suction -> hover.
-        
+
         Args:
             x, y: Position coordinates
             angle: Rotation angle in degrees
@@ -735,7 +735,7 @@ class PLCController:
 
     def _place(self, x: str, y: str, angle: str = "0") -> None:
         """Execute place sequence: hover -> place -> release -> hover.
-        
+
         Args:
             x, y: Position coordinates
             angle: Rotation angle in degrees
@@ -755,12 +755,12 @@ class PLCController:
     @staticmethod
     def _grid_slot(count: int) -> Tuple[int, int, int]:
         """Calculate grid position (row, column, layer) for slot index.
-        
+
         Grid layout: 2 layers of 2x3 grid, 6 slots per layer.
-        
+
         Args:
             count: Slot index (0-11)
-            
+
         Returns:
             Tuple of (row, column, layer)
         """
@@ -808,9 +808,9 @@ class PLCController:
         if not detections:
             self.logger.warning("process_detections called with empty detection list")
             return
-        
+
         self.logger.info(f"Processing {len(detections)} detections")
-        
+
         for i, det in enumerate(detections):
             try:
                 shape = det["shape"]
@@ -837,7 +837,7 @@ class PLCController:
                 else:
                     self.logger.debug(f"Object is reject, placing in reject bin")
                     self._place_reject()
-                
+
                 self.logger.info(f"Successfully processed object {i + 1}/{len(detections)}")
             except (PLCError, Exception) as e:
                 self.logger.error(f"Failed to process detection {i + 1}/{len(detections)}: {e}", exc_info=True)
@@ -853,7 +853,7 @@ def run_sorting(
     go_home_after: bool = True
 ) -> None:
     """Execute sorting sequence for detected objects.
-    
+
     Args:
         detections: List of detection dicts from detect_objects()
         ip: PLC IP address
@@ -863,14 +863,14 @@ def run_sorting(
         go_home_after: Whether to return to photo point when done
     """
     logger = get_logger()
-    
+
     if not detections:
         logger.info("No objects to sort, skipping.")
         print("No objects to sort, skipping.")
         return
 
     plc = PLCController(ip=ip, port=port, z_above=z_above, z_grab=z_grab)
-    
+
     try:
         logger.info(f"Starting sorting sequence with {len(detections)} objects")
         plc.connect()
@@ -955,7 +955,7 @@ def main() -> None:
     health_checker = SystemHealthChecker()
     all_healthy, check_results = health_checker.check_all()
     health_checker.print_report()
-    
+
     if not all_healthy:
         logger.warning("Some health checks failed. Proceeding with caution.")
         print("WARNING: Some system components may not be ready.")
