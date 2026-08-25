@@ -29,7 +29,11 @@ class ImageProcessingConstants:
     # Shape classification
     SQUARE_ASPECT_RATIO_MIN = 0.80
     SQUARE_ASPECT_RATIO_MAX = 1.20
+    RECTANGLE_ASPECT_RATIO_MIN = 1.20
+    RECTANGLE_ASPECT_RATIO_MAX = 6.00
     CIRCLE_CIRCULARITY_MIN = 0.75
+    POLYGON_SOLIDITY_MIN = 0.90
+    CIRCLE_VERTEX_COUNT_MIN = 7
     
     # Drawing parameters
     CONTOUR_LINE_WIDTH = 2
@@ -70,6 +74,7 @@ class ColorConstants:
     
     # Default color for unknown objects
     DEFAULT_COLOR = "Unknown"
+    MIN_COLOR_MATCH_RATIO = 0.10
 
 
 # =============================================================================
@@ -241,7 +246,7 @@ class SortingRulesConstants:
     TARGET_COLOR = "Yellow"
     
     # Valid shapes for detection
-    VALID_SHAPES = ["Square", "Circle"]
+    VALID_SHAPES = ["Triangle", "Square", "Rectangle", "Pentagon", "Hexagon", "Circle"]
     
     # Placement strategy
     PLACE_TARGET_BIN = "target"
