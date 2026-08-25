@@ -7,7 +7,8 @@ from exceptions import (
 )
 from logging_config import get_logger
 from retry_logic import retry_with_backoff
-from constants import PLCConstants, RetryConstants
+from constants import PLCConstants, RetryConstants, SortingRulesConstants
+from calibration import pixel_to_robot
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +325,8 @@ class PLCController:
 
                 self._grab(x_str, y_str, angle)
 
-                if is_target_object(shape, color):
+                if (shape == SortingRulesConstants.TARGET_SHAPE and
+                        color == SortingRulesConstants.TARGET_COLOR):
                     self.logger.debug(f"Object is target, placing in target bin")
                     self._place_target()
                 else:

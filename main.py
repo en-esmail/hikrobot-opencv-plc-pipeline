@@ -1,5 +1,5 @@
 import time
-from ctypes import byref, memset, sizeof, cast, POINTER
+from ctypes import memset, cast, POINTER
 
 import cv2
 
@@ -9,6 +9,7 @@ from camera_io import *          # SDK bootstrap + frame_to_bgr + MvCamera, MV_F
 from vision_detection import detect_objects, process_frame
 from plc_controller import PLCController
 from sorting import run_sorting
+from constants import CameraConstants
 
 logger = setup_logging()
 
@@ -54,10 +55,10 @@ def main() -> None:
         if nPacketSize > 0:
             cam.MV_CC_SetIntValue("GevSCPSPacketSize", nPacketSize)
 
-    cam.MV_CC_SetEnumValue("TriggerMode", MV_TRIGGER_MODE_OFF)
-    cam.MV_CC_SetEnumValue("ExposureAuto", 0)
-    cam.MV_CC_SetFloatValue("ExposureTime", 10000.0)
-    cam.MV_CC_SetFloatValue("Gain", 5.0)
+    cam.MV_CC_SetEnumValue("TriggerMode", CameraConstants.TRIGGER_MODE)
+    cam.MV_CC_SetEnumValue("ExposureAuto", CameraConstants.EXPOSURE_AUTO)
+    cam.MV_CC_SetFloatValue("ExposureTime", CameraConstants.EXPOSURE_TIME)
+    cam.MV_CC_SetFloatValue("Gain", CameraConstants.GAIN)
 
     ret = cam.MV_CC_StartGrabbing()
     if ret != 0:
@@ -88,8 +89,12 @@ def main() -> None:
 
     snapshot_count = 0
 
-    cv2.namedWindow("Hikrobot Camera", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Hikrobot Camera", 800, 600)
+    cv2.namedWindow(CameraConstants.DISPLAY_WINDOW_NAME, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(
+        CameraConstants.DISPLAY_WINDOW_NAME,
+        CameraConstants.DISPLAY_WINDOW_WIDTH,
+        CameraConstants.DISPLAY_WINDOW_HEIGHT
+    )
 
     latest_detections = []
 
@@ -98,9 +103,9 @@ def main() -> None:
             stFrame = MV_FRAME_OUT()
             memset(byref(stFrame), 0, sizeof(stFrame))
 
-            ret = cam.MV_CC_GetImageBuffer(stFrame, 1000)
+            ret = cam.MV_CC_GetImageBuffer(stFrame, CameraConstants.FRAME_GRAB_TIMEOUT)
             if ret != 0:
-                time.sleep(0.005)
+                time.sleep(CameraConstants.FRAME_GRAB_SLEEP)
                 continue
 
             try:
@@ -111,7 +116,7 @@ def main() -> None:
             latest_detections = detect_objects(frame_bgr)
             frame_bgr = process_frame(frame_bgr)
 
-            cv2.imshow("Hikrobot Camera", frame_bgr)
+            cv2.imshow(CameraConstants.DISPLAY_WINDOW_NAME, frame_bgr)
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break

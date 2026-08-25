@@ -2,7 +2,6 @@ from typing import List, Dict, Any
 
 from logging_config import get_logger
 from constants import SortingRulesConstants, PLCConstants
-from calibration import pixel_to_robot
 from plc_controller import PLCController, PLCConnectionError, PLCTimeoutError, PLCInvalidResponseError, PLCOperationError
 
 
@@ -13,7 +12,7 @@ def is_target_object(shape: str, color: str) -> bool:
     """Determine if object should go to target or reject bin.
 
     Args:
-        shape: "Square" or "Circle"
+        shape: "Square", "Circle", or "Triangle"
         color: "Red", "Yellow", or "Blue"
 
     Returns:

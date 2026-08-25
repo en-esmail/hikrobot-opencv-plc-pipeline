@@ -40,8 +40,6 @@ class ObjectDetector:
 
         self.logger = get_logger()
 
-    # adding different shapes to be detected
-
     def preprocess_frame(self, frame_bgr: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Preprocess frame using pre-allocated buffers.
 
@@ -88,7 +86,7 @@ class ObjectDetector:
 
         Returns:
             List of detection dictionaries with keys:
-            - "shape": detected shape name
+            - "shape": "Square", "Circle", or "Triangle"
             - "color": "Red", "Yellow", or "Blue"
             - "x": pixel x-coordinate of centroid
             - "y": pixel y-coordinate of centroid
@@ -160,7 +158,7 @@ def classify_shape(contour: np.ndarray) -> Optional[str]:
         contour: OpenCV contour (numpy array)
 
     Returns:
-        Shape name, or None if unable to classify
+        "Square", "Circle", "Triangle", or None if unable to classify
     """
     perimeter = cv2.arcLength(contour, True)
     if perimeter <= 0:
@@ -200,16 +198,6 @@ def classify_shape(contour: np.ndarray) -> Optional[str]:
         if (ImageProcessingConstants.SQUARE_ASPECT_RATIO_MIN <= aspect_ratio <=
                 ImageProcessingConstants.SQUARE_ASPECT_RATIO_MAX):
             return "Square"
-        normalized_aspect_ratio = max(aspect_ratio, 1.0 / aspect_ratio)
-        if (ImageProcessingConstants.RECTANGLE_ASPECT_RATIO_MIN <= normalized_aspect_ratio <=
-                ImageProcessingConstants.RECTANGLE_ASPECT_RATIO_MAX):
-            return "Rectangle"
-
-    if sides == 5:
-        return "Pentagon"
-
-    if sides == 6:
-        return "Hexagon"
 
     return None
 
@@ -266,7 +254,7 @@ def _contour_angle(contour: np.ndarray, shape: Optional[str]) -> float:
 
     Args:
         contour: OpenCV contour
-        shape: Shape classification ("Square", "Circle", or None)
+        shape: Shape classification ("Square", "Circle", "Triangle", or None)
 
     Returns:
         Angle in degrees. Non-circular shapes use minAreaRect rotation,
@@ -286,7 +274,7 @@ def detect_objects(frame_bgr: np.ndarray) -> List[Dict[str, Any]]:
 
     Returns:
         List of detection dictionaries with keys:
-        - "shape": detected shape name
+        - "shape": "Square", "Circle", or "Triangle"
         - "color": "Red", "Yellow", or "Blue"
         - "x": pixel x-coordinate of centroid
         - "y": pixel y-coordinate of centroid
