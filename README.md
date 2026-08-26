@@ -13,9 +13,6 @@ This repository contains a unified Python pipeline that completely replaces exte
 -->
 ## Demo
 
-[//]: # (Add demo video here — see comment above for embedding options)
-
-
 https://github.com/user-attachments/assets/ae3bb85e-4480-4de4-a577-6c1af3e34a65
 
 
