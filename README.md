@@ -13,7 +13,9 @@ This repository contains a unified Python pipeline that completely replaces exte
 -->
 ## Demo
 
-https://github.com/user-attachments/assets/ae3bb85e-4480-4de4-a577-6c1af3e34a65
+https://github.com/user-attachments/assets/ab7edeb7-75da-4a32-a15c-b7e2166a9017
+
+
 
 
 
